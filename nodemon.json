@@ -1,0 +1,19 @@
+{
+    "restartable": "rs",
+    "ignore": [
+      ".git",
+      "node_modules/**/node_modules"
+    ],
+    "verbose": true,
+    "execMap": {
+      "ts": "./node_modules/.bin/hardhat test --network hardhat test/BookOfLore.spec.ts"
+    },
+    "watch": [
+      "test/",
+      "src/"
+    ],
+    "env": {
+      "NODE_ENV": "development"
+    },
+    "ext": "js json ts"
+  }
