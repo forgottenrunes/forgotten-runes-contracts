@@ -5,6 +5,8 @@ import chaiSubset from 'chai-subset';
 import { solidity } from 'ethereum-waffle';
 import { BigNumber, Contract } from 'ethers';
 import { ethers, waffle } from 'hardhat';
+import * as ethSigUtil from 'eth-sig-util';
+import { TypedDataUtils } from 'ethers-eip712';
 
 chai.use(chaiSubset);
 chai.use(solidity);
@@ -13,6 +15,13 @@ const { expect } = chai;
 const overrides = {
   gasLimit: 9999999,
 };
+
+const EIP712Domain = [
+  { name: 'name', type: 'string' },
+  { name: 'version', type: 'string' },
+  { name: 'chainId', type: 'uint256' },
+  { name: 'verifyingContract', type: 'address' },
+];
 
 function printGasEstimate({ gasAmount }) {
   const gasPrice = parseUnits('5', 'gwei');
@@ -25,6 +34,17 @@ function printGasEstimate({ gasAmount }) {
   console.log('gasCostUsd:', gasCostUsd.toNumber() / 100);
 }
 
+async function domainSeparator(name, version, chainId, verifyingContract) {
+  return (
+    '0x' +
+    ethSigUtil.TypedDataUtils.hashStruct(
+      'EIP712Domain',
+      { name, version, chainId, verifyingContract },
+      { EIP712Domain }
+    ).toString('hex')
+  );
+}
+
 describe('ForgottenRunes BookOfLore', () => {
   let wallet: any;
   let alice: any;
@@ -33,6 +53,7 @@ describe('ForgottenRunes BookOfLore', () => {
   const provider = waffle.provider;
   let wizardsContract: Contract;
   let contract: Contract;
+  let chainId: any;
 
   beforeEach(async () => {
     const signers = await ethers.getSigners();
@@ -53,6 +74,7 @@ describe('ForgottenRunes BookOfLore', () => {
     );
     contract = await contractFactory.deploy(wizardsContract.address);
     await contract.deployed();
+    chainId = await wallet.getChainId();
   });
 
   describe('BookOfLore', () => {
@@ -73,8 +95,6 @@ describe('ForgottenRunes BookOfLore', () => {
         contract = await contract.connect(alice);
         const response = await contract.addLore(
           1,
-          wizardsContract.address,
-          9,
           0,
           false,
           'https://foo.bar/9'
@@ -83,23 +103,9 @@ describe('ForgottenRunes BookOfLore', () => {
         expect(receipt.gasUsed.toNumber()).to.be.lt(200000);
         // printGasEstimate({ gasAmount: receipt.gasUsed });
 
-        await contract.addLore(
-          1,
-          wizardsContract.address,
-          8,
-          1,
-          true,
-          'https://foo.bar/8'
-        );
+        await contract.addLore(1, 1, true, 'https://foo.bar/8');
 
-        await contract.addLore(
-          1,
-          wizardsContract.address,
-          7,
-          0,
-          false,
-          'https://foo.bar/7'
-        );
+        await contract.addLore(1, 0, false, 'https://foo.bar/7');
 
         expect(await contract.numLore(1)).to.eq(3);
 
@@ -107,24 +113,18 @@ describe('ForgottenRunes BookOfLore', () => {
 
         const lore1Attributes = {
           creator: alice.address,
-          assetAddress: wizardsContract.address,
-          tokenId: BigNumber.from(9),
           nsfw: false,
           struck: false,
           loreMetadataURI: 'https://foo.bar/9',
         };
         const lore2Attributes = {
           creator: alice.address,
-          assetAddress: wizardsContract.address,
-          tokenId: BigNumber.from(8),
           nsfw: true,
           struck: false,
           loreMetadataURI: 'https://foo.bar/8',
         };
         const lore3Attributes = {
           creator: alice.address,
-          assetAddress: wizardsContract.address,
-          tokenId: BigNumber.from(7),
           nsfw: false,
           struck: false,
           loreMetadataURI: 'https://foo.bar/7',
@@ -162,28 +162,180 @@ describe('ForgottenRunes BookOfLore', () => {
       it('should not allow a non-owner of a Wizard to add Lore to that Wizard', async () => {
         contract = await contract.connect(eve);
         await expect(
-          contract.addLore(
-            1,
-            wizardsContract.address,
-            9,
-            0,
-            false,
-            'https://foo.bar/9'
-          )
+          contract.addLore(1, 0, false, 'https://foo.bar/9')
         ).to.be.revertedWith('Owner: caller is not the Wizard owner');
       });
     });
+
+    describe('when adding lore by signature with EIP-712', () => {
+      // https://docs.ethers.io/v5/api/signer/#Signer
+      // https://github.com/OpenZeppelin/openzeppelin-contracts/blob/3935b907d40c9a23b04b721c2f61758df1caf722/contracts/mocks/EIP712External.sol#L7
+      // https://gist.github.com/ajb413/6ca63eb868e179a9c0a3b8dc735733cf
+      let eip712Types = {
+        // EIP712Domain: [
+        //   { name: 'name', type: 'string' },
+        //   { name: 'version', type: 'string' },
+        //   { name: 'chainId', type: 'uint256' },
+        //   { name: 'verifyingContract', type: 'address' },
+        // ],
+        AddLore: [
+          { name: 'wizardId', type: 'uint256' },
+          { name: 'loreId', type: 'uint256' },
+          { name: 'parentLoreId', type: 'uint256' },
+          { name: 'nsfw', type: 'bool' },
+          { name: 'loreMetadataURI', type: 'string' },
+        ],
+      };
+
+      let eip712Domain;
+
+      beforeEach(() => {
+        eip712Domain = {
+          name: 'BookOfLore',
+          version: '1',
+          chainId,
+          verifyingContract: contract.address,
+        };
+      });
+
+      it('has a domain separator', async function() {
+        expect(await contract.domainSeparator()).to.equal(
+          await domainSeparator('BookOfLore', '1', chainId, contract.address)
+        );
+      });
+
+      it('should allow an outside account to add lore', async () => {
+        // alice owns wizard 1
+        expect(await wizardsContract.ownerOf(1)).to.eq(alice.address);
+
+        const message = {
+          wizardId: 1,
+          loreId: 0,
+          parentLoreId: 0,
+          nsfw: false,
+          loreMetadataURI: 'https://foo.bar/signed-01',
+        };
+
+        const signature = await alice._signTypedData(
+          eip712Domain,
+          eip712Types,
+          message
+        );
+
+        // but bob submits
+        contract = await contract.connect(bob);
+        await contract.addLoreWithSignature(
+          signature,
+          1,
+          0,
+          0,
+          false,
+          'https://foo.bar/signed-01'
+        );
+
+        const lore = await contract.wizardLore(1, 0);
+        expect(lore.loreMetadataURI).to.eq('https://foo.bar/signed-01');
+      });
+      it('should not allow an outside account to add lore if the signature is wrong', async () => {
+        // bob submits
+        contract = await contract.connect(bob);
+
+        await expect(
+          contract.addLoreWithSignature(
+            123, // nonsense
+            1,
+            0,
+            0,
+            false,
+            'https://foo.bar/signed-01'
+          )
+        ).to.be.revertedWith('ECDSA: invalid signature length');
+      });
+      it('should not allow an outside account to add lore if signing account is no longer the wizard holder', async () => {
+        // alice owns wizard 1
+        expect(await wizardsContract.ownerOf(1)).to.eq(alice.address);
+
+        const message = {
+          wizardId: 1,
+          loreId: 0,
+          parentLoreId: 0,
+          nsfw: false,
+          loreMetadataURI: 'https://foo.bar/signed-01',
+        };
+
+        // and signs a valid message
+        const signature = await alice._signTypedData(
+          eip712Domain,
+          eip712Types,
+          message
+        );
+
+        // but then alice transfers the wizard to bob
+        wizardsContract = await wizardsContract.connect(alice);
+        await wizardsContract.transferFrom(alice.address, bob.address, 1);
+
+        // but eve submits
+        contract = await contract.connect(eve);
+        expect(
+          contract.addLoreWithSignature(
+            signature,
+            1,
+            0,
+            0,
+            false,
+            'https://foo.bar/signed-01'
+          )
+        ).to.be.revertedWith(
+          'addLoreWithSignature: signature is not the current Wizard owner'
+        );
+      });
+
+      it('should not allow an outside account to add lore if the nonce is wrong', async () => {
+        // alice owns wizard 1
+        expect(await wizardsContract.ownerOf(1)).to.eq(alice.address);
+
+        const message = {
+          wizardId: 1,
+          loreId: 0,
+          parentLoreId: 0,
+          nsfw: false,
+          loreMetadataURI: 'https://foo.bar/signed-01',
+        };
+
+        // she signs a valid message
+        const signature = await alice._signTypedData(
+          eip712Domain,
+          eip712Types,
+          message
+        );
+
+        // but then she updates directly
+        contract = await contract.connect(alice);
+        await contract.addLore(1, 0, false, 'https://foo.bar/my-lore');
+
+        // and eve submits
+        contract = await contract.connect(eve);
+        expect(
+          contract.addLoreWithSignature(
+            signature,
+            1,
+            0,
+            0,
+            false,
+            'https://foo.bar/signed-01'
+          )
+        ).to.be.revertedWith('addLoreWithSignature: loreId is stale');
+
+        // and the original lore remains
+        const lore = await contract.wizardLore(1, 0);
+        expect(lore.loreMetadataURI).to.eq('https://foo.bar/my-lore');
+      });
+    });
+
     describe('when updating lore metadata', () => {
       beforeEach(async () => {
         contract = await contract.connect(alice);
-        await contract.addLore(
-          1,
-          wizardsContract.address,
-          9,
-          0,
-          false,
-          'https://foo.bar/9'
-        );
+        await contract.addLore(1, 0, false, 'https://foo.bar/9');
 
         const lore = await contract.wizardLore(1, 0);
         expect(lore.loreMetadataURI).to.eq('https://foo.bar/9');
@@ -222,14 +374,7 @@ describe('ForgottenRunes BookOfLore', () => {
     describe('when updating lore nsfw', () => {
       beforeEach(async () => {
         contract = await contract.connect(alice);
-        await contract.addLore(
-          1,
-          wizardsContract.address,
-          9,
-          0,
-          false,
-          'https://foo.bar/9'
-        );
+        await contract.addLore(1, 0, false, 'https://foo.bar/9');
 
         const lore = await contract.wizardLore(1, 0);
         expect(lore.nsfw).to.eq(false);
@@ -246,7 +391,7 @@ describe('ForgottenRunes BookOfLore', () => {
 
         contract = await contract.connect(alice);
         await expect(contract.updateLoreNSFW(1, 0, true)).to.be.revertedWith(
-          'Owner: caller neither the Lore creator nor the Lore Master'
+          'Owner: caller is neither the Lore creator nor the Lore Master'
         );
 
         const lore = await contract.wizardLore(1, 0);
@@ -255,7 +400,7 @@ describe('ForgottenRunes BookOfLore', () => {
       it(`should not allow just anyone to update nsfw`, async () => {
         contract = await contract.connect(eve);
         await expect(contract.updateLoreNSFW(1, 0, true)).to.be.revertedWith(
-          'Owner: caller neither the Lore creator nor the Lore Master'
+          'Owner: caller is neither the Lore creator nor the Lore Master'
         );
         const lore = await contract.wizardLore(1, 0);
         expect(lore.nsfw).to.eq(false);
@@ -271,22 +416,8 @@ describe('ForgottenRunes BookOfLore', () => {
     describe('when striking lore', () => {
       beforeEach(async () => {
         contract = await contract.connect(alice);
-        await contract.addLore(
-          1,
-          wizardsContract.address,
-          9,
-          0,
-          false,
-          'https://foo.bar/9'
-        );
-        await contract.addLore(
-          1,
-          wizardsContract.address,
-          8,
-          0,
-          false,
-          'https://foo.bar/8'
-        );
+        await contract.addLore(1, 0, false, 'https://foo.bar/9');
+        await contract.addLore(1, 0, false, 'https://foo.bar/8');
 
         const lore = await contract.wizardLore(1, 0);
         expect(lore.struck).to.eq(false);
@@ -318,7 +449,7 @@ describe('ForgottenRunes BookOfLore', () => {
         expect(lore.struck).to.eq(false);
 
         await expect(contract.strikeLore(1, 1, true)).to.be.revertedWith(
-          'Ownable: caller is not the Lore Master'
+          'Owner: caller is neither the Lore creator nor the Lore Master'
         );
 
         const loreUpdated = await contract.wizardLore(1, 1);
@@ -329,52 +460,28 @@ describe('ForgottenRunes BookOfLore', () => {
       it(`should allow the Lore Master to add narrative Lore`, async () => {
         contract = await contract.connect(wallet);
 
-        await contract.addNarrative(
-          wizardsContract.address,
-          9,
-          0,
-          false,
-          'https://foo.bar/9'
-        );
+        await contract.addNarrative(0, false, 'https://foo.bar/9');
 
-        await contract.addNarrative(
-          wizardsContract.address,
-          8,
-          1,
-          true,
-          'https://foo.bar/8'
-        );
+        await contract.addNarrative(1, true, 'https://foo.bar/8');
 
-        await contract.addNarrative(
-          wizardsContract.address,
-          7,
-          0,
-          false,
-          'https://foo.bar/7'
-        );
+        await contract.addNarrative(0, false, 'https://foo.bar/7');
 
         expect(await contract.numNarrative()).to.eq(3);
 
         const lore1Attributes = {
           creator: wallet.address,
-          assetAddress: wizardsContract.address,
-          tokenId: BigNumber.from(9),
           nsfw: false,
           struck: false,
           loreMetadataURI: 'https://foo.bar/9',
         };
         const lore2Attributes = {
           creator: wallet.address,
-          assetAddress: wizardsContract.address,
-          tokenId: BigNumber.from(8),
           nsfw: true,
           struck: false,
           loreMetadataURI: 'https://foo.bar/8',
         };
         const lore3Attributes = {
           creator: wallet.address,
-          assetAddress: wizardsContract.address,
-          tokenId: BigNumber.from(7),
           nsfw: false,
           struck: false,
           loreMetadataURI: 'https://foo.bar/7',
@@ -404,13 +511,7 @@ describe('ForgottenRunes BookOfLore', () => {
         contract = await contract.connect(eve);
 
         await expect(
-          contract.addNarrative(
-            wizardsContract.address,
-            9,
-            0,
-            false,
-            'https://foo.bar/9'
-          )
+          contract.addNarrative(0, false, 'https://foo.bar/9')
         ).to.be.revertedWith('Ownable: caller is not the Lore Master');
       });
     });

@@ -3,17 +3,17 @@
 pragma solidity ^0.8.0;
 import '@openzeppelin/contracts/access/Ownable.sol';
 import '@openzeppelin/contracts/token/ERC721/IERC721.sol';
+import '@openzeppelin/contracts/utils/cryptography/ECDSA.sol';
+import '@openzeppelin/contracts/utils/cryptography/draft-EIP712.sol';
 
 /**
  * @title The Book of Lore
  */
-contract BookOfLore is Ownable {
+contract BookOfLore is Ownable, EIP712 {
     address public wizardsContractAddress;
 
     struct Lore {
         address creator;
-        address assetAddress;
-        uint256 tokenId;
         uint256 parentLoreId;
         bool nsfw;
         bool struck;
@@ -29,7 +29,7 @@ contract BookOfLore is Ownable {
     event NarrativeAdded(uint256 loreIdx);
     event NarrativeUpdated(uint256 loreIdx);
 
-    constructor(address _wizardsContractAddress) {
+    constructor(address _wizardsContractAddress) EIP712('BookOfLore', '1') {
         wizardsContractAddress = _wizardsContractAddress;
     }
 
@@ -74,8 +74,6 @@ contract BookOfLore is Ownable {
     }
 
     function addNarrative(
-        address assetAddress,
-        uint256 tokenId,
         uint256 parentLoreId,
         bool nsfw,
         string memory loreMetadataURI
@@ -85,15 +83,7 @@ contract BookOfLore is Ownable {
             'Ownable: caller is not the Lore Master'
         );
         narrative.push(
-            Lore(
-                _msgSender(),
-                assetAddress,
-                tokenId,
-                parentLoreId,
-                nsfw,
-                false,
-                loreMetadataURI
-            )
+            Lore(_msgSender(), parentLoreId, nsfw, false, loreMetadataURI)
         );
         emit NarrativeAdded(narrative.length - 1);
     }
@@ -112,8 +102,6 @@ contract BookOfLore is Ownable {
 
     function addLore(
         uint256 wizardId,
-        address assetAddress,
-        uint256 tokenId,
         uint256 parentLoreId,
         bool nsfw,
         string memory loreMetadataURI
@@ -124,15 +112,57 @@ contract BookOfLore is Ownable {
             'Owner: caller is not the Wizard owner'
         );
         wizardLore[wizardId].push(
-            Lore(
-                _msgSender(),
-                assetAddress,
-                tokenId,
-                parentLoreId,
-                nsfw,
-                false,
-                loreMetadataURI
+            Lore(_msgSender(), parentLoreId, nsfw, false, loreMetadataURI)
+        );
+        emit LoreAdded(wizardId, wizardLore[wizardId].length - 1);
+    }
+
+    function addLoreWithSignature(
+        bytes memory signature,
+        uint256 wizardId,
+        uint256 loreId,
+        uint256 parentLoreId,
+        bool nsfw,
+        string memory loreMetadataURI
+    ) public {
+        // construct an expected hash, given the parameters
+        bytes32 digest = _hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    keccak256(
+                        'AddLore(uint256 wizardId,uint256 loreId,uint256 parentLoreId,bool nsfw,string loreMetadataURI)'
+                    ),
+                    wizardId,
+                    loreId, // acts as nonce
+                    parentLoreId,
+                    nsfw,
+                    keccak256(bytes(loreMetadataURI)) // tricky!
+                )
             )
+        );
+
+        // now recover the signer from the provided signature
+        address signer = ECDSA.recover(digest, signature);
+
+        // make sure the recover extracted a signer, but beware, because this
+        // can return non-zero for some invalid cases (apparently?)
+        require(signer != address(0), 'ECDSA: invalid signature');
+
+        // get the owner of this wizard
+        address wizardOwner = IERC721(wizardsContractAddress).ownerOf(wizardId);
+
+        require(
+            signer == wizardOwner,
+            'addLoreWithSignature: signature is not the current Wizard owner'
+        );
+
+        require(
+            numLore(wizardId) == loreId,
+            'addLoreWithSignature: loreId is stale'
+        );
+
+        wizardLore[wizardId].push(
+            Lore(signer, parentLoreId, nsfw, false, loreMetadataURI)
         );
         emit LoreAdded(wizardId, wizardLore[wizardId].length - 1);
     }
@@ -170,7 +200,7 @@ contract BookOfLore is Ownable {
         require(
             (wizardLore[wizardId][loreIdx].creator == _msgSender() &&
                 wizardOwner == _msgSender()) || (owner() == _msgSender()),
-            'Owner: caller neither the Lore creator nor the Lore Master'
+            'Owner: caller is neither the Lore creator nor the Lore Master'
         );
 
         wizardLore[wizardId][loreIdx].nsfw = newNSFW;
@@ -183,13 +213,20 @@ contract BookOfLore is Ownable {
         uint256 loreIdx,
         bool newStruck
     ) public {
+        address wizardOwner = IERC721(wizardsContractAddress).ownerOf(wizardId);
+
         require(
-            owner() == _msgSender(),
-            'Ownable: caller is not the Lore Master'
+            (wizardLore[wizardId][loreIdx].creator == _msgSender() &&
+                wizardOwner == _msgSender()) || (owner() == _msgSender()),
+            'Owner: caller is neither the Lore creator nor the Lore Master'
         );
 
         wizardLore[wizardId][loreIdx].struck = newStruck;
 
         emit LoreStruck(wizardId, loreIdx);
+    }
+
+    function domainSeparator() external view returns (bytes32) {
+        return _domainSeparatorV4();
     }
 }
