@@ -3,7 +3,7 @@ import { parseUnits } from '@ethersproject/units';
 import chai from 'chai';
 import chaiSubset from 'chai-subset';
 import { solidity } from 'ethereum-waffle';
-import { BigNumber, Contract } from 'ethers';
+import { BigNumber, Contract, Wallet } from 'ethers';
 import { ethers, waffle } from 'hardhat';
 import * as ethSigUtil from 'eth-sig-util';
 
