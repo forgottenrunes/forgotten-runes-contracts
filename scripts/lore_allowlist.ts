@@ -47,7 +47,7 @@ async function deploy(argv: any) {
   console.log('Balance:', balance.toString());
 
   const overrides = {
-    gasPrice: parseUnits(argv.gas, 'gwei'),
+    gasPrice: parseUnits(argv.gas.toString(), 'gwei'),
   };
 
   let contract = new ethers.Contract(argv.lore, BookOfLoreAbi, provider);
