@@ -44,6 +44,7 @@ async function deploy(argv: any) {
   console.log('deployTx: ', deployTx);
 
   let txResponse = await signer.sendTransaction(deployTx);
+  console.log('txResponse: ', txResponse);
   console.log('Submitted tx:', txResponse.hash);
 
   const receipt = await provider.waitForTransaction(
@@ -71,7 +72,7 @@ deploy(argv)
 
 // DEPLOY_ENV=rinkeby ts-node scripts/deploy_lore.ts
 
-// DEPLOY_ENV=rinkeby hardhat verify --network rinkeby 0xdEb9121865D634A15023C7724B38F5c7Db6C88bB
+// DEPLOY_ENV=rinkeby hardhat verify --network rinkeby 0xe6d5ed58B39aC190A5e347B87F018561036b56B9
 
 // DEPLOY_ENV=mainnet ts-node scripts/deploy_lore.ts --contract "0x521f9C7505005CFA19A8E5786a9c3c9c9F5e6f42"
 

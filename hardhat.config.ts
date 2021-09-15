@@ -145,7 +145,7 @@ task('balance', "Prints an account's balance")
     const balance = await ethers.provider.getBalance(
       await getAddress(taskArgs.account)
     );
-    console.log(formatUnits(balance, 'ether'), 'ETH');
+    console.log(formatUnits(balance as any, 'ether'), 'ETH');
   });
 
 task('fundTestWallet', 'funds the test wallet').setAction(

@@ -104,7 +104,7 @@
     "ethcall": "^3.4.1",
     "ethereum-waffle": "^3.2.1",
     "ethereumjs-util": "^7.0.7",
-    "ethers": "^5.0.26",
+    "ethers": "5.4.6",
     "express": "^4.17.1",
     "fast-csv": "^4.3.6",
     "file-system-cache": "^1.0.5",

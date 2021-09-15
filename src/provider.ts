@@ -39,7 +39,7 @@ export async function getSigner({ provider }): Promise<Signer> {
         'hid',
         process.env.LEDGER_HD_PATH || "m/44'/60'/0'/0/0"
       );
-      signer = ledger as Signer;
+      signer = ledger as any;
       break;
     }
   }
