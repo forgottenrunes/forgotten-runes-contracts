@@ -6,7 +6,6 @@ import { solidity } from 'ethereum-waffle';
 import { BigNumber, Contract } from 'ethers';
 import { ethers, waffle } from 'hardhat';
 import * as ethSigUtil from 'eth-sig-util';
-import { TypedDataUtils } from 'ethers-eip712';
 
 chai.use(chaiSubset);
 chai.use(solidity);
@@ -77,7 +76,7 @@ describe('ForgottenRunes BookOfLore', () => {
       'ForgottenRunesWizardsCult',
       signers[0]
     );
-    blizzardsContract = await wizardFactory.deploy('https://bar.com');
+    blizzardsContract = await blizzardFactory.deploy('https://bar.com');
     blizzards = blizzardsContract.address;
 
     const contractFactory = await ethers.getContractFactory(
@@ -505,6 +504,55 @@ describe('ForgottenRunes BookOfLore', () => {
         expect(await contract.numLore(blizzards, 8)).to.eq(1);
         const lore = await contract.tokenLore(blizzards, 8, 0);
         expect(lore.loreMetadataURI).to.eq('https://foo.bar/8');
+      });
+    });
+
+    describe('when writing with a Scribe', () => {
+      let loreWriter: Contract;
+      beforeEach(async () => {
+        const loreWriterFactory = await ethers.getContractFactory(
+          'LoreWriterMock',
+          wallet
+        );
+        loreWriter = await loreWriterFactory.deploy(contract.address);
+      });
+
+      it('should not allow unscribed writes', async () => {
+        loreWriter = await loreWriter.connect(alice);
+        expect(
+          loreWriter.writeLore(wizards, 1, 'https://foo.bar/scribelore')
+        ).to.be.revertedWith('sender is not a Scribe');
+      });
+
+      describe('when the contract is a Scribe', () => {
+        beforeEach(async () => {
+          await contract.setScribeAllowlist(loreWriter.address, true);
+        });
+
+        it('should allow writing Lore through a scribe', async () => {
+          loreWriter = await loreWriter.connect(alice);
+          await loreWriter.writeLore(wizards, 1, 'https://foo.bar/scribelore');
+          const lore = await contract.tokenLore(wizards, 1, 0);
+          expect(lore.loreMetadataURI).to.eq('https://foo.bar/scribelore');
+        });
+
+        it('should not allow writing Lore through a scribe invalid method', async () => {
+          loreWriter = await loreWriter.connect(alice);
+          expect(
+            loreWriter.writeLoreInvalid(
+              wizards,
+              1,
+              'https://foo.bar/scribelore'
+            )
+          ).to.be.revertedWith('Owner: caller is not the token owner');
+        });
+
+        it('should not allow a non-token owner to write Lore through a Scribe', async () => {
+          loreWriter = await loreWriter.connect(bob);
+          expect(
+            loreWriter.writeLore(wizards, 1, 'https://foo.bar/scribelore')
+          ).to.be.revertedWith('Owner: tx.origin is not the token owner');
+        });
       });
     });
   });

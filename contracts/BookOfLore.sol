@@ -21,6 +21,7 @@ contract BookOfLore is Ownable, EIP712 {
     //      tokenContract      tokenId    loreId
     mapping(address => mapping(uint256 => Lore[])) public tokenLore;
     mapping(address => bool) public loreTokenContractAllowlist;
+    mapping(address => bool) public scribeAllowlist;
 
     event LoreAdded(address tokenContract, uint256 tokenId, uint256 loreIdx);
     event LoreUpdated(address tokenContract, uint256 tokenId, uint256 loreIdx);
@@ -72,6 +73,13 @@ contract BookOfLore is Ownable, EIP712 {
         onlyOwner
     {
         loreTokenContractAllowlist[tokenContract] = isListed;
+    }
+
+    function setScribeAllowlist(address scribeAddress, bool isScribe)
+        public
+        onlyOwner
+    {
+        scribeAllowlist[scribeAddress] = isScribe;
     }
 
     function addLore(
@@ -145,6 +153,38 @@ contract BookOfLore is Ownable, EIP712 {
         tokenLore[tokenContract][tokenId].push(
             Lore(signer, parentLoreId, nsfw, false, loreMetadataURI)
         );
+        emit LoreAdded(
+            tokenContract,
+            tokenId,
+            tokenLore[tokenContract][tokenId].length - 1
+        );
+    }
+
+    /**
+     * A Scribe is a contract that is allowed to write Lore *if* the transaction
+     * originated from the token owner. For example, The Great Burning may write
+     * the death of a Wizard and the inception of their Soul
+     */
+    function addLoreWithScribe(
+        address tokenContract,
+        uint256 tokenId,
+        uint256 parentLoreId,
+        bool nsfw,
+        string memory loreMetadataURI
+    ) public onlyAllowedTokenContract(tokenContract) {
+        require(scribeAllowlist[_msgSender()], 'sender is not a Scribe');
+
+        address tokenOwner = IERC721(tokenContract).ownerOf(tokenId);
+        require(
+            tokenOwner == tx.origin, // ! - note that msg.sender must be a Scribe for this to work
+            'Owner: tx.origin is not the token owner'
+        );
+
+        tokenLore[tokenContract][tokenId].push(
+            // we credit this lore to the Scribe, not the token owner
+            Lore(_msgSender(), parentLoreId, nsfw, false, loreMetadataURI)
+        );
+
         emit LoreAdded(
             tokenContract,
             tokenId,
