@@ -10,8 +10,6 @@ import '@openzeppelin/contracts/utils/cryptography/draft-EIP712.sol';
  * @title The Book of Lore
  */
 contract BookOfLore is Ownable, EIP712 {
-    address public wizardsContractAddress;
-
     struct Lore {
         address creator;
         uint256 parentLoreId;
@@ -20,33 +18,43 @@ contract BookOfLore is Ownable, EIP712 {
         string loreMetadataURI;
     }
 
-    mapping(uint256 => Lore[]) public wizardLore;
-    Lore[] public narrative;
+    //      tokenContract      tokenId    loreId
+    mapping(address => mapping(uint256 => Lore[])) public tokenLore;
+    mapping(address => bool) public loreTokenContractAllowlist;
 
-    event LoreAdded(uint256 wizardId, uint256 loreIdx);
-    event LoreUpdated(uint256 wizardId, uint256 loreIdx);
-    event LoreStruck(uint256 wizardId, uint256 loreIdx);
-    event NarrativeAdded(uint256 loreIdx);
-    event NarrativeUpdated(uint256 loreIdx);
+    event LoreAdded(address tokenContract, uint256 tokenId, uint256 loreIdx);
+    event LoreUpdated(address tokenContract, uint256 tokenId, uint256 loreIdx);
+    event LoreStruck(address tokenContract, uint256 tokenId, uint256 loreIdx);
 
-    constructor(address _wizardsContractAddress) EIP712('BookOfLore', '1') {
-        wizardsContractAddress = _wizardsContractAddress;
+    modifier onlyAllowedTokenContract(address tokenContract) {
+        require(
+            loreTokenContractAllowlist[tokenContract],
+            'tokenContract is not on the allowlist'
+        );
+        _;
     }
 
-    function numLore(uint256 wizardId) public view returns (uint256) {
-        return wizardLore[wizardId].length;
+    constructor() EIP712('BookOfLore', '1') {}
+
+    function numLore(address tokenContract, uint256 tokenId)
+        public
+        view
+        returns (uint256)
+    {
+        return tokenLore[tokenContract][tokenId].length;
     }
 
-    function numNarrative() public view returns (uint256) {
-        return narrative.length;
-    }
-
-    function loreFor(uint256 wizardId) public view returns (Lore[] memory) {
-        return wizardLore[wizardId];
+    function loreFor(address tokenContract, uint256 tokenId)
+        public
+        view
+        returns (Lore[] memory)
+    {
+        return tokenLore[tokenContract][tokenId];
     }
 
     function loreAt(
-        uint256 wizardId,
+        address tokenContract,
+        uint256 tokenId,
         uint256 startIdx,
         uint256 endIdx
     ) public view returns (Lore[] memory) {
@@ -54,85 +62,58 @@ contract BookOfLore is Ownable, EIP712 {
         uint256 length = endIdx - startIdx + 1;
 
         for (uint256 i = 0; i < length; i++) {
-            l[i] = wizardLore[wizardId][startIdx + i];
+            l[i] = tokenLore[tokenContract][tokenId][startIdx + i];
         }
         return l;
     }
 
-    function narrativeAt(uint256 startIdx, uint256 endIdx)
+    function setLoreTokenAllowlist(address tokenContract, bool isListed)
         public
-        view
-        returns (Lore[] memory)
+        onlyOwner
     {
-        Lore[] memory l = new Lore[](endIdx - startIdx + 1);
-        uint256 length = endIdx - startIdx + 1;
-
-        for (uint256 i = 0; i < length; i++) {
-            l[i] = narrative[startIdx + i];
-        }
-        return l;
-    }
-
-    function addNarrative(
-        uint256 parentLoreId,
-        bool nsfw,
-        string memory loreMetadataURI
-    ) public {
-        require(
-            owner() == _msgSender(),
-            'Ownable: caller is not the Lore Master'
-        );
-        narrative.push(
-            Lore(_msgSender(), parentLoreId, nsfw, false, loreMetadataURI)
-        );
-        emit NarrativeAdded(narrative.length - 1);
-    }
-
-    function updateNarrativeMetadataURI(
-        uint256 loreIdx,
-        string memory newLoreMetadataURI
-    ) public {
-        require(
-            owner() == _msgSender(),
-            'Ownable: caller is not the Lore Master'
-        );
-        narrative[loreIdx].loreMetadataURI = newLoreMetadataURI;
-        emit NarrativeUpdated(loreIdx);
+        loreTokenContractAllowlist[tokenContract] = isListed;
     }
 
     function addLore(
-        uint256 wizardId,
+        address tokenContract,
+        uint256 tokenId,
         uint256 parentLoreId,
         bool nsfw,
         string memory loreMetadataURI
-    ) public {
-        address wizardOwner = IERC721(wizardsContractAddress).ownerOf(wizardId);
+    ) public onlyAllowedTokenContract(tokenContract) {
+        address tokenOwner = IERC721(tokenContract).ownerOf(tokenId);
         require(
-            wizardOwner == _msgSender(),
-            'Owner: caller is not the Wizard owner'
+            tokenOwner == _msgSender(),
+            'Owner: caller is not the token owner'
         );
-        wizardLore[wizardId].push(
+        tokenLore[tokenContract][tokenId].push(
             Lore(_msgSender(), parentLoreId, nsfw, false, loreMetadataURI)
         );
-        emit LoreAdded(wizardId, wizardLore[wizardId].length - 1);
+        emit LoreAdded(
+            tokenContract,
+            tokenId,
+            tokenLore[tokenContract][tokenId].length - 1
+        );
     }
 
     function addLoreWithSignature(
         bytes memory signature,
-        uint256 wizardId,
+        address tokenContract,
+        uint256 tokenId,
         uint256 loreId,
         uint256 parentLoreId,
         bool nsfw,
         string memory loreMetadataURI
-    ) public {
+    ) public onlyAllowedTokenContract(tokenContract) {
         // construct an expected hash, given the parameters
         bytes32 digest = _hashTypedDataV4(
             keccak256(
                 abi.encode(
                     keccak256(
-                        'AddLore(uint256 wizardId,uint256 loreId,uint256 parentLoreId,bool nsfw,string loreMetadataURI)'
+                        'AddLore(address tokenContract,uint256 tokenId,uint256 loreId,uint256 parentLoreId,bool nsfw,string loreMetadataURI)'
                     ),
-                    wizardId,
+                    tokenContract,
+                    tokenId,
                     loreId, // acts as nonce
                     parentLoreId,
                     nsfw,
@@ -149,81 +130,91 @@ contract BookOfLore is Ownable, EIP712 {
         require(signer != address(0), 'ECDSA: invalid signature');
 
         // get the owner of this wizard
-        address wizardOwner = IERC721(wizardsContractAddress).ownerOf(wizardId);
+        address tokenOwner = IERC721(tokenContract).ownerOf(tokenId);
 
         require(
-            signer == wizardOwner,
-            'addLoreWithSignature: signature is not the current Wizard owner'
+            signer == tokenOwner,
+            'addLoreWithSignature: signature is not the current token owner'
         );
 
         require(
-            numLore(wizardId) == loreId,
+            numLore(tokenContract, tokenId) == loreId,
             'addLoreWithSignature: loreId is stale'
         );
 
-        wizardLore[wizardId].push(
+        tokenLore[tokenContract][tokenId].push(
             Lore(signer, parentLoreId, nsfw, false, loreMetadataURI)
         );
-        emit LoreAdded(wizardId, wizardLore[wizardId].length - 1);
+        emit LoreAdded(
+            tokenContract,
+            tokenId,
+            tokenLore[tokenContract][tokenId].length - 1
+        );
     }
 
     function updateLoreMetadataURI(
-        uint256 wizardId,
+        address tokenContract,
+        uint256 tokenId,
         uint256 loreIdx,
         string memory newLoreMetadataURI
-    ) public {
+    ) public onlyAllowedTokenContract(tokenContract) {
         // is lore creator
         require(
-            wizardLore[wizardId][loreIdx].creator == _msgSender(),
+            tokenLore[tokenContract][tokenId][loreIdx].creator == _msgSender(),
             'Owner: caller is not the Lore creator'
         );
 
         // holds wizard currently
-        address wizardOwner = IERC721(wizardsContractAddress).ownerOf(wizardId);
+        address tokenOwner = IERC721(tokenContract).ownerOf(tokenId);
         require(
-            wizardOwner == _msgSender(),
-            'Owner: caller is not the Wizard owner'
+            tokenOwner == _msgSender(),
+            'Owner: caller is not the token owner'
         );
 
-        wizardLore[wizardId][loreIdx].loreMetadataURI = newLoreMetadataURI;
+        tokenLore[tokenContract][tokenId][loreIdx]
+            .loreMetadataURI = newLoreMetadataURI;
 
-        emit LoreUpdated(wizardId, loreIdx);
+        emit LoreUpdated(tokenContract, tokenId, loreIdx);
     }
 
     function updateLoreNSFW(
-        uint256 wizardId,
+        address tokenContract,
+        uint256 tokenId,
         uint256 loreIdx,
         bool newNSFW
-    ) public {
-        address wizardOwner = IERC721(wizardsContractAddress).ownerOf(wizardId);
+    ) public onlyAllowedTokenContract(tokenContract) {
+        address tokenOwner = IERC721(tokenContract).ownerOf(tokenId);
 
         require(
-            (wizardLore[wizardId][loreIdx].creator == _msgSender() &&
-                wizardOwner == _msgSender()) || (owner() == _msgSender()),
+            (tokenLore[tokenContract][tokenId][loreIdx].creator ==
+                _msgSender() &&
+                tokenOwner == _msgSender()) || (owner() == _msgSender()),
             'Owner: caller is neither the Lore creator nor the Lore Master'
         );
 
-        wizardLore[wizardId][loreIdx].nsfw = newNSFW;
+        tokenLore[tokenContract][tokenId][loreIdx].nsfw = newNSFW;
 
-        emit LoreUpdated(wizardId, loreIdx);
+        emit LoreUpdated(tokenContract, tokenId, loreIdx);
     }
 
     function strikeLore(
-        uint256 wizardId,
+        address tokenContract,
+        uint256 tokenId,
         uint256 loreIdx,
         bool newStruck
-    ) public {
-        address wizardOwner = IERC721(wizardsContractAddress).ownerOf(wizardId);
+    ) public onlyAllowedTokenContract(tokenContract) {
+        address tokenOwner = IERC721(tokenContract).ownerOf(tokenId);
 
         require(
-            (wizardLore[wizardId][loreIdx].creator == _msgSender() &&
-                wizardOwner == _msgSender()) || (owner() == _msgSender()),
+            (tokenLore[tokenContract][tokenId][loreIdx].creator ==
+                _msgSender() &&
+                tokenOwner == _msgSender()) || (owner() == _msgSender()),
             'Owner: caller is neither the Lore creator nor the Lore Master'
         );
 
-        wizardLore[wizardId][loreIdx].struck = newStruck;
+        tokenLore[tokenContract][tokenId][loreIdx].struck = newStruck;
 
-        emit LoreStruck(wizardId, loreIdx);
+        emit LoreStruck(tokenContract, tokenId, loreIdx);
     }
 
     function domainSeparator() external view returns (bytes32) {
