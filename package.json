@@ -26,7 +26,7 @@
     "singleQuote": true,
     "trailingComma": "es5"
   },
-  "name": "forgotten-runes-wizards-contracts",
+  "name": "wizards",
   "author": "Dotta",
   "module": "dist/wizards.esm.js",
   "size-limit": [
@@ -101,12 +101,10 @@
     "deepdash": "^5.3.5",
     "deepdash-es": "^5.3.5",
     "dotenv": "^8.2.0",
-    "eth-sig-util": "^3.0.1",
     "ethcall": "^3.4.1",
     "ethereum-waffle": "^3.2.1",
     "ethereumjs-util": "^7.0.7",
     "ethers": "^5.0.26",
-    "ethers-eip712": "^0.2.0",
     "express": "^4.17.1",
     "fast-csv": "^4.3.6",
     "file-system-cache": "^1.0.5",
